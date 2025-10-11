@@ -7,10 +7,17 @@ authors = [
     {name = "Benito Martin"}
 ]
 license = {text = ""}
-requires-python = "~=3.12"
+requires-python = ">=3.13"
 
 dependencies = [
-
+    "biopython>=1.85",
+    "langchain>=0.3.27",
+    "langchain-community>=0.3.31",
+    "langchain-neo4j>=0.5.0",
+    "langchain-openai>=0.3.0",
+    "neo4j>=5.28.2",
+    "pydantic>=2.12.0",
+    "pydantic-settings>=2.11.0",
 ]
 
 # [[tool.uv.index]]
@@ -151,8 +158,8 @@ strict_optional = true           # Enable strict optional checking
 # --- Testing Tools --- #
 #########################
 
-[tool.pytest.ini_options]       
-testpaths = [ "tests" ]         # Directories where pytest will look for tests  
+[tool.pytest.ini_options]
+testpaths = [ "tests" ]         # Directories where pytest will look for tests
 python_files = [ "test_*.py" ]  # Test file patterns
 addopts = "-ra -v -s"           # Additional command-line options for pytest
 # -r a : Show extra summary info for all tests (skipped, failed, etc.)
@@ -161,5 +168,5 @@ addopts = "-ra -v -s"           # Additional command-line options for pytest
 
 filterwarnings = [
     "ignore::DeprecationWarning", # Ignore DeprecationWarnings
-    "ignore::UserWarning"         # Ignore UserWarnings 
+    "ignore::UserWarning"         # Ignore UserWarnings
 ]

@@ -10,7 +10,6 @@
 
 <!-- Providers -->
 
-
 </div>
 
 ## Table of Contents
@@ -31,7 +30,7 @@
 
 ## Overview
 
-biomedical-graphrag is a Python project designed to [briefly describe purpose].  
+biomedical-graphrag is a Python project designed to [briefly describe purpose].
 It provides [key features] and is built with maintainability and scalability in mind.
 
 ## Project Structure
@@ -58,28 +57,28 @@ It provides [key features] and is built with maintainability and scalability in 
 
    ```bash
    git clone git@github.com:benitomartin/.git
-   cd 
+   cd
    ```
 
-2. Create a virtual environment:
+1. Create a virtual environment:
 
    ```bash
    uv venv
    ```
 
-3. Activate the virtual environment:
+1. Activate the virtual environment:
 
-     ```bash
-     source .venv/bin/activate
-     ```
+   ```bash
+   source .venv/bin/activate
+   ```
 
-4. Install the required packages:
+1. Install the required packages:
 
    ```bash
    uv sync --all-groups --all-extra
    ```
 
-5. Create a `.env` file in the root directory:
+1. Create a `.env` file in the root directory:
 
    ```bash
     cp env.example .env
@@ -122,9 +121,9 @@ Individual Commands:
 
 - Display all available commands:
 
-    ```bash
-    make help
-    ```
+  ```bash
+  make help
+  ```
 
 - Check code formatting and linting:
 
@@ -140,10 +139,10 @@ Individual Commands:
 
 - Clean cache and build files:
 
-    ```bash
-    make clean
-    ```
+  ```bash
+  make clean
+  ```
 
 ## License
 
-This project is licensed under the  - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the - see the [LICENSE](LICENSE) file for details.

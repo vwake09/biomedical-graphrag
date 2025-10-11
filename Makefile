@@ -11,6 +11,40 @@ include .env
 .PHONY: tests mypy clean help ruff-check ruff-check-fix ruff-format ruff-format-fix all-check all-fix
 
 #################################################################################
+## Data Collector Commands
+#################################################################################
+
+data-collector-run: ## Run the data collector
+	@echo "Running data collector..."
+	uv run src/biomedical_graphrag/data_sources/pubmed/pubmed_data_collector.py
+	@echo "Data collector run complete."
+
+#################################################################################
+## Neo4j Graph Commands
+#################################################################################
+
+create-graph: ## Create the Neo4j graph from the dataset
+	@echo "Creating Neo4j graph from dataset..."
+	uv run src/biomedical_graphrag/infrastructure/neo4j_db/create_graph.py
+	@echo "Neo4j graph creation complete."
+
+delete-graph: ## Delete all nodes and relationships in the Neo4j graph
+	@echo "Deleting all nodes and relationships in the Neo4j graph..."
+	uv run src/biomedical_graphrag/infrastructure/neo4j_db/delete_graph.py
+	@echo "Neo4j graph deletion complete."
+
+example-query: ## Run an example query on the Neo4j graph
+	@echo "Running example query on the Neo4j graph..."
+	uv run src/biomedical_graphrag/infrastructure/neo4j_db/query_graph.py
+	@echo "Example query complete."
+
+custom-query: ## Run a custom query on the Neo4j graph (modify the --ask parameter as needed)
+	@echo "Running custom query on the Neo4j graph..."
+	uv run src/biomedical_graphrag/infrastructure/neo4j_db/query_graph.py \
+	  --ask "What are the latest advancements in CRISPR gene editing?"
+	@echo "Custom query complete."
+
+#################################################################################
 ## Testing
 #################################################################################
 
@@ -50,7 +84,7 @@ ruff-check-fix: ## Auto-format code using Ruff
 # Formatting (just checks)
 ruff-format: ## Check code format violations (--diff to show possible changes)
 	@echo "Checking Ruff formatting..."
-	uv run ruff format . --check 
+	uv run ruff format . --check
 	@echo "Ruff format checks complete."
 
 ruff-format-fix: ## Auto-format code using Ruff
