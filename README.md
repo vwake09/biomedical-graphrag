@@ -1,4 +1,4 @@
-# Biomedical GraphRag
+# Biomedical GraphRAG
 
 ![Neo4j UI](static/image.png)
 
@@ -20,7 +20,7 @@
 
 ## Table of Contents
 
-- [Biomedical GraphRag](#biomedical-graphrag)
+- [Biomedical GraphRAG](#biomedical-graphrag)
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
   - [Project Structure](#project-structure)
