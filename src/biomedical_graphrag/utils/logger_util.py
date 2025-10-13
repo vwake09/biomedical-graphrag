@@ -1,36 +1,36 @@
-# import os
-# import sys
+from __future__ import annotations
 
-# from loguru import logger as loguru_logger
+import os
+import sys
+from typing import TYPE_CHECKING
 
-# def setup_logging(log_level: str | None = None):
-#     """Returns a logger configured for the current environment.
+from loguru import logger
 
-#     - Inside Prefect flow/task: Prefect's run logger (`logging.Logger`).
-#     - Outside Prefect: Loguru logger.
-
-#     Args:
-#         log_level (str | None): Logging level to use (DEBUG, INFO, WARNING, ERROR).
-#                                  Defaults to LOG_LEVEL env variable or DEBUG.
-
-#     Returns:
-#         logging.Logger | loguru.Logger: Configured logger instance.
-
-#     """
-#     log_level = log_level or os.getenv("LOG_LEVEL", "DEBUG").upper()
+if TYPE_CHECKING:
+    from loguru import Logger
 
 
-#     # Outside Prefect → Loguru
-#     loguru_logger.remove()
-#     loguru_logger.add(
-#         sys.stdout,
-#         level=log_level,
-#         colorize=True,
-#         backtrace=True,
-#         diagnose=True,
-#         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-#         "<level>{level}</level> | <cyan>{module}</cyan>:<cyan>{function}</cyan> - "
-#         "<level>{message}</level>",
-#     )
-#     loguru_logger.debug(f"Logging initialized at {log_level} level (Loguru).")
-#     return loguru_logger
+def setup_logging(log_level: str | None = None) -> Logger:
+    """Set up logging configuration.
+    Args:
+        log_level: Logging level (e.g., "DEBUG", "INFO").
+        If None, defaults to environment variable LOG_LEVEL or "DEBUG".
+    Returns:
+        Configured logger instance.
+    """
+    log_level = log_level or os.getenv("LOG_LEVEL", "DEBUG").upper()
+
+    # Outside Prefect → Loguru
+    logger.remove()
+    logger.add(
+        sys.stdout,
+        level=log_level,
+        colorize=True,
+        backtrace=True,
+        diagnose=True,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        "<level>{level}</level> | <cyan>{module}</cyan>:<cyan>{function}</cyan> - "
+        "<level>{message}</level>",
+    )
+    logger.debug(f"Logging initialized at {log_level} level (Loguru).")
+    return logger

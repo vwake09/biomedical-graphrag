@@ -1,7 +1,7 @@
-from biomedical_graphrag.infrastructure.neo4j_db.neo4j_client import Neo4jClient
+from biomedical_graphrag.infrastructure.neo4j_db.neo4j_client import AsyncNeo4jClient
 
 
-def delete_graph() -> None:
+async def delete_graph() -> None:
     """
     Delete all nodes and relationships in the Neo4j graph database.
 
@@ -11,11 +11,12 @@ def delete_graph() -> None:
         None
     """
 
-    client = Neo4jClient()
-
-    client.delete_graph()
-    client.close()
+    client = await AsyncNeo4jClient.create()
+    await client.delete_graph()
+    await client.close()
 
 
 if __name__ == "__main__":
-    delete_graph()
+    import asyncio
+
+    asyncio.run(delete_graph())

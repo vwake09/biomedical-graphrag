@@ -1,18 +1,23 @@
+import asyncio
 from datetime import datetime
+from typing import Any
 
 from biomedical_graphrag.config import settings
 from biomedical_graphrag.data_sources.base import BaseDataSource
 from biomedical_graphrag.data_sources.pubmed.pubmed_api_client import PubMedAPIClient
 from biomedical_graphrag.domain.author import Author
 from biomedical_graphrag.domain.citation import CitationNetwork
-from biomedical_graphrag.domain.dataset import Dataset, Metadata
+from biomedical_graphrag.domain.dataset import PaperDataset, PaperMetadata
 from biomedical_graphrag.domain.meshterm import MeSHTerm
 from biomedical_graphrag.domain.paper import Paper
+from biomedical_graphrag.utils.logger_util import setup_logging
+
+logger = setup_logging()
 
 
 class PubMedDataCollector(BaseDataSource):
     """
-    Data collector for PubMed, implements BaseDataSource.
+    Data collector for PubMed, implements BaseDataSource (async).
     """
 
     def __init__(self) -> None:
@@ -25,11 +30,12 @@ class PubMedDataCollector(BaseDataSource):
             None
         """
 
+        super().__init__()
         self.api = PubMedAPIClient()
 
-    def search(self, query: str, max_results: int) -> list[str]:
+    async def search(self, query: str, max_results: int) -> list[str]:
         """
-        Search PubMed for paper IDs matching the query.
+        Search PubMed for paper IDs matching the query (async).
 
         Args:
             query (str): The search query string.
@@ -37,32 +43,111 @@ class PubMedDataCollector(BaseDataSource):
         Returns:
             list[str]: List of PubMed IDs (PMIDs) matching the query.
         """
-        return self.api.search(query, max_results)
+        logger.info(f"Starting PubMed search for query='{query}' (max_results={max_results})")
+        await self._rate_limit()
+        ids = await self.api.search(query, max_results)
+        logger.info(f"Found {len(ids)} PubMed IDs for query")
+        return ids
 
-    def fetch_papers(self, paper_ids: list[str]) -> list[Paper]:
+    async def fetch_papers(self, paper_ids: list[str]) -> list[Paper]:
         """
-        Fetch paper details from PubMed using a list of paper IDs.
+        Fetch paper details from PubMed using a list of paper IDs (async).
 
         Args:
             paper_ids (list[str]): List of PubMed IDs (PMIDs) to fetch.
         Returns:
             list[Paper]: List of Paper objects containing details of the fetched papers.
         """
-        raw_papers = self.api.fetch_papers(paper_ids)
+        logger.info(f"Fetching details for {len(paper_ids)} PubMed IDs")
+        await self._rate_limit()
+        raw_papers = await self.api.fetch_papers(paper_ids)
+        logger.info(f"Fetched {len(raw_papers)} raw PubMed records; parsing into Paper models")
         papers = [self._parse_paper(r) for r in raw_papers]
+        logger.info(f"Parsed {len(papers)} papers")
         return papers
 
-    def fetch_citations(self, paper_id: str) -> dict:
+    async def fetch_citations(self, paper_id: str) -> dict:
         """
-        Fetch citations (cited by and references) for a given paper ID.
+        Fetch citations (cited by and references) for a given paper ID (async).
 
         Args:
             paper_id (str): The PubMed ID (PMID) of the paper to fetch citations for.
         Returns:
             dict: A dictionary containing the citations for the paper.
         """
-        citations = self.api.fetch_citations(paper_id)
+        logger.debug(f"Fetching citations for PMID={paper_id}")
+        await self._rate_limit()
+        citations = await self.api.fetch_citations(paper_id)
         return {"pmid": paper_id, **citations}
+
+    # Common abstract method unification
+    async def fetch_entities(self, entity_ids: list[str]) -> list[Any]:
+        """
+        Fetch paper details from PubMed using a list of paper IDs (async).
+
+        Args:
+            entity_ids (list[str]): List of PubMed IDs (PMIDs) to fetch.
+        Returns:
+            list[object]: List of Paper objects containing details of the fetched papers.
+        """
+        return await self.fetch_papers(entity_ids)
+
+    # Keep explicit collect_dataset for symmetry with GeneDataCollector
+    async def collect_dataset(self, query: str, max_results: int) -> PaperDataset:
+        """Collect PubMed dataset for given query.
+
+        Args:
+            query: Search query string.
+            max_results: Maximum number of results to collect.
+
+        Returns:
+            PaperDataset containing collected papers and metadata.
+        """
+        logger.info("Collecting PubMed dataset...")
+        paper_ids = await self.search(query, max_results)
+        papers = await self.fetch_papers(paper_ids)
+
+        # Fetch citations with controlled concurrency (max 10 at a time to match API limit)
+        semaphore = asyncio.Semaphore(8)
+
+        async def fetch_with_semaphore(paper: Paper) -> dict:
+            """
+            Fetch citations with semaphore.
+
+            Args:
+                paper (Paper): The paper to fetch citations for.
+            Returns:
+                dict: A dictionary containing the citations for the paper.
+            """
+            async with semaphore:
+                return await self.fetch_citations(paper.pmid)
+
+        citation_tasks = [fetch_with_semaphore(paper) for paper in papers]
+        citations_list = await asyncio.gather(*citation_tasks)
+
+        citation_network = {}
+        for idx, (paper, citations) in enumerate(zip(papers, citations_list, strict=False), start=1):
+            logger.debug(
+                f"[{idx}/{len(papers)}] Processed citations for '{paper.title[:80]}' (PMID={paper.pmid})"
+            )
+            citation_network[paper.pmid] = CitationNetwork(**citations)
+
+        total_authors = sum(len(paper.authors) for paper in papers)
+        total_mesh_terms = sum(len(paper.mesh_terms) for paper in papers)
+        logger.info(
+            f"Computed totals: papers={len(papers)}, authors={total_authors}, \
+            MeSH terms={total_mesh_terms}, with_citations={len(citation_network)}"
+        )
+        metadata = PaperMetadata(
+            collection_date=datetime.now().isoformat(),
+            query=query,
+            total_papers=len(papers),
+            papers_with_citations=len(citation_network),
+            total_authors=total_authors,
+            total_mesh_terms=total_mesh_terms,
+        )
+        logger.info("PubMed dataset collection complete")
+        return PaperDataset(metadata=metadata, papers=papers, citation_network=citation_network)
 
     def _parse_paper(self, record: dict) -> Paper:
         """
@@ -235,37 +320,26 @@ class PubMedDataCollector(BaseDataSource):
                 pub_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
         return pub_date
 
-    def collect_dataset(self, query: str, max_results: int) -> Dataset:
-        """
-        Collect a dataset of papers matching the query and return a Dataset object.
-        """
-
-        paper_ids = self.search(query, max_results)
-        papers = self.fetch_papers(paper_ids)
-        citation_network = {}
-        for paper in papers:
-            citations = self.fetch_citations(paper.pmid)
-            citation_network[paper.pmid] = CitationNetwork(**citations)
-
-        total_authors = sum(len(paper.authors) for paper in papers)
-        total_mesh_terms = sum(len(paper.mesh_terms) for paper in papers)
-        metadata = Metadata(
-            collection_date=datetime.now().isoformat(),
-            query=query,
-            total_papers=len(papers),
-            papers_with_citations=len(citation_network),
-            total_authors=total_authors,
-            total_mesh_terms=total_mesh_terms,
-        )
-        return Dataset(metadata=metadata, papers=papers, citation_network=citation_network)
-
 
 if __name__ == "__main__":
-    api_key = settings.pubmed.api_key
-    email = settings.pubmed.email
-    print("Using email:", email)
-    print("Using api_key:", api_key)
-    collector = PubMedDataCollector()
-    dataset = collector.collect_dataset("CRISPR gene editing cancer", 10)
-    with open("data/pubmed_dataset.json", "w") as f:
-        f.write(dataset.model_dump_json(indent=2))
+
+    async def main() -> None:
+        """
+        Main function to collect PubMed dataset.
+
+        Returns:
+            None
+        """
+        api_key = settings.pubmed.api_key
+        email = settings.pubmed.email
+        print("Using email:", email)
+        print("Using api_key:", api_key)
+        collector = PubMedDataCollector()
+        dataset = await collector.collect_dataset(
+            query="CRISPR gene editing Homo sapiens[Organism]",
+            max_results=1000,
+        )
+        with open(settings.json_data.pubmed_json_path, "w") as f:
+            f.write(dataset.model_dump_json(indent=2))
+
+    asyncio.run(main())

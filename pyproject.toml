@@ -11,19 +11,27 @@ requires-python = ">=3.13"
 
 dependencies = [
     "biopython>=1.85",
-    "langchain>=0.3.27",
-    "langchain-community>=0.3.31",
-    "langchain-neo4j>=0.5.0",
-    "langchain-openai>=0.3.0",
+    "loguru>=0.7.3",
     "neo4j>=5.28.2",
+    "neo4j-graphrag>=1.10.0",
+    "openai>=1.0.0",
     "pydantic>=2.12.0",
     "pydantic-settings>=2.11.0",
+    "qdrant-client>=1.15.1",
 ]
 
 # [[tool.uv.index]]
 # name = "pytorch-cpu"
 # url = "https://download.pytorch.org/whl/cpu"
 # explicit = true
+
+# [tool.uv.sources]
+# torch = [
+#   { index = "pytorch-cpu" },
+# ]
+# torchvision = [
+#   { index = "pytorch-cpu" },
+# ]
 
 [dependency-groups]
 dev = [
@@ -35,6 +43,7 @@ lint = [
 ]
 test = [
     "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
 ]
 
 [build-system]
@@ -62,17 +71,19 @@ update_changelog_on_bump = true    # auto-update CHANGELOG.md on each version bu
 ######################################
 [tool.bandit]
 targets = ["src"]
+# Note: Bandit configuration is handled in .pre-commit-config.yaml
+# to exclude tests/ directory and skip B101 (assert_used) rule
 
 ######################################
 # --- Linting & Formatting Tools --- #
 ######################################
 
 [tool.ruff]
-# Assume Python 3.12
-target-version = "py312"
+# Assume Python 3.13
+target-version = "py313"
 
 # Same as Black.
-line-length = 100     # Line length of 100 chars (like Black default is 88)
+line-length = 105     # Line length of 105 chars (like Black default is 88)
 indent-width = 4      # Indent with 4 spaces (like Black)
 
 # Exclude a variety of commonly ignored directories.

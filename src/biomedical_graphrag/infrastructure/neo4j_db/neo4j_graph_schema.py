@@ -1,36 +1,31 @@
-"""Neo4j graph ingestion for biomedical papers dataset."""
+"""High-performance async Neo4j graph ingestion for biomedical papers and genes."""
 
+import asyncio
 from typing import Any
 
-from biomedical_graphrag.domain.dataset import Dataset
+from biomedical_graphrag.domain.dataset import GeneDataset, PaperDataset
 from biomedical_graphrag.domain.paper import Paper
-from biomedical_graphrag.infrastructure.neo4j_db.neo4j_client import Neo4jClient
+from biomedical_graphrag.infrastructure.neo4j_db.neo4j_client import AsyncNeo4jClient
+from biomedical_graphrag.utils.logger_util import setup_logging
+
+logger = setup_logging()
 
 
 class Neo4jGraphIngestion:
-    """Handles ingestion of biomedical paper data into Neo4j graph database."""
+    """Asynchronous, batched ingestion of biomedical papers and genes into Neo4j."""
 
-    def __init__(self, client: Neo4jClient) -> None:
-        """
-        Initialize the graph ingestion handler.
-
-        Args:
-            client: Neo4jClient instance for database operations
-        """
+    def __init__(
+        self, client: AsyncNeo4jClient, concurrency_limit: int = 25, batch_size: int = 100
+    ) -> None:
         self.client = client
+        self.semaphore = asyncio.Semaphore(concurrency_limit)
+        self.batch_size = batch_size
 
-    def create_constraints(self) -> None:
-        """
-        Create unique constraints for graph nodes to ensure data integrity.
-
-        This creates constraints for:
-        - Paper nodes (by PMID)
-        - Author nodes (by name)
-        - Institution nodes (by name)
-        - MeshTerm nodes (by UI)
-        - Qualifier nodes (by name)
-        - Journal nodes (by name)
-        """
+    # =====================================================
+    # ================ CONSTRAINTS ========================
+    # =====================================================
+    async def create_constraints(self) -> None:
+        """Ensure unique keys for all biomedical node types."""
         constraints = [
             "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Paper) REQUIRE p.pmid IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (a:Author) REQUIRE a.name IS UNIQUE",
@@ -38,172 +33,220 @@ class Neo4jGraphIngestion:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (m:MeshTerm) REQUIRE m.ui IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (q:Qualifier) REQUIRE q.name IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (j:Journal) REQUIRE j.name IS UNIQUE",
+            "CREATE CONSTRAINT IF NOT EXISTS FOR (g:Gene) REQUIRE g.gene_id IS UNIQUE",
         ]
+        for c in constraints:
+            await self.client.create_graph(c)
+        logger.info("✅ Constraints verified or created.")
 
-        for constraint in constraints:
-            self.client.create_graph(constraint)
+    # =====================================================
+    # ================= PAPER INGESTION ===================
+    # =====================================================
+    async def ingest_paper_dataset(self, dataset: PaperDataset) -> None:
+        """Ingest papers, authors, MeSH, and citations."""
+        await self.create_constraints()
 
-    def ingest_paper(self, paper: Paper) -> None:
-        """
-        Ingest a single paper and all its related entities into the graph.
+        logger.info(f"🧾 Ingesting {len(dataset.papers)} papers asynchronously...")
 
-        Args:
-            paper: Paper domain model containing all paper metadata
-        """
-        # Create paper node
-        self._create_paper_node(paper)
+        # --- Batch paper nodes ---
+        for i in range(0, len(dataset.papers), self.batch_size):
+            batch = dataset.papers[i : i + self.batch_size]
+            await self._create_paper_batch(batch)
+            logger.info(f"  → Inserted {i + len(batch)} / {len(dataset.papers)} papers")
 
-        # Create journal relationship if available
-        if paper.journal:
-            self._create_journal_relationship(paper.pmid, paper.journal)
+        # --- Authors, institutions, MeSH (async concurrent) ---
+        tasks = [self._safe_ingest_paper_relationships(paper) for paper in dataset.papers]
+        await asyncio.gather(*tasks)
+        logger.info("✅ Paper relationships created.")
 
-        # Create authors and their affiliations
-        for author in paper.authors:
-            self._create_author_relationship(paper.pmid, author.name)
+        # --- Citations ---
+        await self.ingest_citations(dataset.citation_network)
+        logger.info("✅ Paper ingestion complete.")
 
-            for affiliation in author.affiliations:
-                self._create_affiliation_relationship(author.name, affiliation)
+    async def _safe_ingest_paper_relationships(self, paper: Paper) -> None:
+        """Concurrent-safe ingestion for relationships."""
+        async with self.semaphore:
+            try:
+                if paper.journal:
+                    await self._create_journal_relationship(paper.pmid, paper.journal)
 
-        # Create MeSH terms and qualifiers
-        for mesh_term in paper.mesh_terms:
-            self._create_mesh_term_relationship(
-                paper.pmid, mesh_term.ui, mesh_term.term, mesh_term.major_topic
-            )
+                for author in paper.authors:
+                    await self._create_author_relationship(paper.pmid, author.name)
+                    for affiliation in author.affiliations:
+                        await self._create_affiliation_relationship(author.name, affiliation)
 
-            for qualifier in mesh_term.qualifiers:
-                self._create_qualifier_relationship(mesh_term.ui, qualifier)
+                for mesh_term in paper.mesh_terms:
+                    await self._create_mesh_term_relationship(
+                        paper.pmid, mesh_term.ui, mesh_term.term, mesh_term.major_topic
+                    )
+                    for qualifier in mesh_term.qualifiers:
+                        await self._create_qualifier_relationship(mesh_term.ui, qualifier)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to ingest relationships for paper {paper.pmid}: {e}")
 
-    def ingest_citations(self, citation_network: dict[str, Any]) -> None:
-        """
-        Ingest citation relationships between papers.
-
-        Args:
-            citation_network: Dictionary mapping PMIDs to CitationNetwork objects
-        """
-        for pmid, citation_info in citation_network.items():
-            # Create references (this paper cites others)
-            references = (
-                citation_info.references
-                if hasattr(citation_info, "references")
-                else citation_info.get("references", [])
-            )
-            for reference_pmid in references:
-                self._create_citation_relationship(pmid, reference_pmid)
-
-            # Cited_by relationships are the inverse and will be created
-            # when those papers reference this one
-
-    def ingest_dataset(self, dataset: Dataset) -> None:
-        """
-        Ingest complete dataset including papers and citations.
-
-        Args:
-            dataset: Complete dataset with papers and citation network
-
-        Raises:
-            Exception: If ingestion fails for any reason
-        """
-        try:
-            print("Creating constraints...")
-            self.create_constraints()
-
-            print(f"Ingesting {len(dataset.papers)} papers...")
-            failed_papers = []
-
-            for i, paper in enumerate(dataset.papers, 1):
-                try:
-                    self.ingest_paper(paper)
-                    if i % 10 == 0:
-                        print(f"  Processed {i}/{len(dataset.papers)} papers")
-                except Exception as e:
-                    print(f"  Warning: Failed to ingest paper {paper.pmid}: {e}")
-                    failed_papers.append(paper.pmid)
-
-            if failed_papers:
-                print(f"\nWarning: {len(failed_papers)} papers failed to ingest")
-
-            print("Ingesting citation network...")
-            self.ingest_citations(dataset.citation_network)
-
-            print("Graph ingestion complete!")
-
-        except Exception as e:
-            print(f"\nError: Graph ingestion failed: {e}")
-            raise
-
-    def _create_paper_node(self, paper: Paper) -> None:
-        """Create or update a paper node with its metadata."""
+    async def _create_paper_batch(self, papers: list[Paper]) -> None:
+        """Insert papers in batches using UNWIND for speed."""
         query = """
-            MERGE (p:Paper {pmid: $pmid})
-            SET p.title = $title,
-                p.abstract = $abstract,
-                p.publication_date = $publication_date,
-                p.doi = $doi
+        UNWIND $batch AS row
+        MERGE (p:Paper {pmid: row.pmid})
+        SET p.title = row.title,
+            p.abstract = row.abstract,
+            p.publication_date = row.publication_date,
+            p.doi = row.doi
         """
         params = {
-            "pmid": paper.pmid,
-            "title": paper.title,
-            "abstract": paper.abstract,
-            "publication_date": paper.publication_date,
-            "doi": paper.doi,
+            "batch": [
+                {
+                    "pmid": p.pmid,
+                    "title": p.title,
+                    "abstract": p.abstract,
+                    "publication_date": p.publication_date,
+                    "doi": p.doi,
+                }
+                for p in papers
+            ]
         }
-        self.client.create_graph(query, params)
+        await self.client.create_graph(query, params)
 
-    def _create_journal_relationship(self, pmid: str, journal: str) -> None:
-        """Create journal node and relationship to paper."""
+    async def ingest_citations(self, citation_network: dict[str, Any]) -> None:
+        """Create CITES relationships (batched for performance)."""
+        all_edges = []
+        for pmid, cinfo in citation_network.items():
+            refs = getattr(cinfo, "references", [])
+            for ref in refs:
+                all_edges.append({"citing": pmid, "cited": ref})
+
+        for i in range(0, len(all_edges), self.batch_size * 5):
+            batch = all_edges[i : i + self.batch_size * 5]
+            query = """
+            UNWIND $batch AS edge
+            MATCH (p1:Paper {pmid: edge.citing})
+            MATCH (p2:Paper {pmid: edge.cited})
+            MERGE (p1)-[:CITES]->(p2)
+            """
+            await self.client.create_graph(query, {"batch": batch})
+        logger.info(f"Created {len(all_edges)} citation relationships.")
+
+    # =====================================================
+    # ================== GENE INGESTION ===================
+    # =====================================================
+    async def ingest_genes(self, gene_dataset: GeneDataset) -> None:
+        """Ingest genes and link them to papers, then compute co-occurrences."""
+        await self.create_constraints()
+
+        genes = getattr(gene_dataset, "genes", [])
+        logger.info(f"🧬 Ingesting {len(genes)} genes asynchronously...")
+
+        # --- Batch genes ---
+        for i in range(0, len(genes), self.batch_size):
+            batch = genes[i : i + self.batch_size]
+            await self._create_gene_batch(batch)
+            logger.info(f"  → Inserted {i + len(batch)} / {len(genes)} genes")
+
+        # --- Link genes to papers concurrently ---
+        tasks = [self._safe_link_gene_to_papers(gene) for gene in genes]
+        await asyncio.gather(*tasks)
+
+    async def _create_gene_batch(self, genes: list[Any]) -> None:
+        """Insert genes in batches using UNWIND."""
         query = """
+        UNWIND $batch AS g
+        MERGE (gene:Gene {gene_id: g.gene_id})
+        SET gene.name = g.name,
+            gene.description = g.description,
+            gene.chromosome = g.chromosome,
+            gene.map_location = g.map_location,
+            gene.organism = g.organism,
+            gene.aliases = g.aliases,
+            gene.designations = g.designations
+        """
+        params = {
+            "batch": [
+                {
+                    "gene_id": g.gene_id,
+                    "name": g.name,
+                    "description": g.description,
+                    "chromosome": g.chromosome,
+                    "map_location": g.map_location,
+                    "organism": g.organism,
+                    "aliases": g.aliases,
+                    "designations": g.designations,
+                }
+                for g in genes
+            ]
+        }
+        await self.client.create_graph(query, params)
+
+    async def _safe_link_gene_to_papers(self, gene: Any) -> None:
+        """Concurrent-safe creation of Gene–Paper relationships."""
+        async with self.semaphore:
+            try:
+                for pmid in getattr(gene, "linked_pmids", []):
+                    if pmid:
+                        await self._create_gene_paper_relationship(gene_id=gene.gene_id, pmid=pmid)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed linking gene {gene.gene_id} → papers: {e}")
+
+    async def _create_gene_paper_relationship(self, *, gene_id: str, pmid: str) -> None:
+        query = """
+        MERGE (g:Gene {gene_id: $gene_id})
+        MERGE (p:Paper {pmid: $pmid})
+        MERGE (g)-[:MENTIONED_IN]->(p)
+        """
+        await self.client.create_graph(query, {"gene_id": gene_id, "pmid": pmid})
+
+    # =====================================================
+    # ============== RELATIONSHIP HELPERS =================
+    # =====================================================
+    async def _create_journal_relationship(self, pmid: str, journal: str) -> None:
+        await self.client.create_graph(
+            """
             MERGE (j:Journal {name: $journal})
             MERGE (p:Paper {pmid: $pmid})
             MERGE (p)-[:PUBLISHED_IN]->(j)
-        """
-        self.client.create_graph(query, {"pmid": pmid, "journal": journal})
+            """,
+            {"pmid": pmid, "journal": journal},
+        )
 
-    def _create_author_relationship(self, pmid: str, author_name: str) -> None:
-        """Create author node and WROTE relationship to paper."""
-        query = """
+    async def _create_author_relationship(self, pmid: str, author_name: str) -> None:
+        await self.client.create_graph(
+            """
             MERGE (a:Author {name: $name})
             MERGE (p:Paper {pmid: $pmid})
             MERGE (a)-[:WROTE]->(p)
-        """
-        self.client.create_graph(query, {"name": author_name, "pmid": pmid})
+            """,
+            {"name": author_name, "pmid": pmid},
+        )
 
-    def _create_affiliation_relationship(self, author_name: str, affiliation: str) -> None:
-        """Create institution node and AFFILIATED_WITH relationship."""
-        query = """
+    async def _create_affiliation_relationship(self, author_name: str, affiliation: str) -> None:
+        await self.client.create_graph(
+            """
             MERGE (i:Institution {name: $affiliation})
             MERGE (a:Author {name: $name})
             MERGE (a)-[:AFFILIATED_WITH]->(i)
-        """
-        self.client.create_graph(query, {"name": author_name, "affiliation": affiliation})
+            """,
+            {"name": author_name, "affiliation": affiliation},
+        )
 
-    def _create_mesh_term_relationship(
+    async def _create_mesh_term_relationship(
         self, pmid: str, ui: str, term: str, major_topic: bool
     ) -> None:
-        """Create MeSH term node and relationship to paper."""
-        query = """
+        await self.client.create_graph(
+            """
             MERGE (m:MeshTerm {ui: $ui})
             SET m.term = $term
             MERGE (p:Paper {pmid: $pmid})
             MERGE (p)-[:HAS_MESH_TERM {major_topic: $major_topic}]->(m)
-        """
-        self.client.create_graph(
-            query, {"ui": ui, "term": term, "pmid": pmid, "major_topic": major_topic}
+            """,
+            {"ui": ui, "term": term, "pmid": pmid, "major_topic": major_topic},
         )
 
-    def _create_qualifier_relationship(self, mesh_ui: str, qualifier: str) -> None:
-        """Create qualifier node and relationship to MeSH term."""
-        query = """
+    async def _create_qualifier_relationship(self, mesh_ui: str, qualifier: str) -> None:
+        await self.client.create_graph(
+            """
             MERGE (q:Qualifier {name: $qualifier})
             MERGE (m:MeshTerm {ui: $ui})
             MERGE (m)-[:HAS_QUALIFIER]->(q)
-        """
-        self.client.create_graph(query, {"ui": mesh_ui, "qualifier": qualifier})
-
-    def _create_citation_relationship(self, citing_pmid: str, cited_pmid: str) -> None:
-        """Create CITES relationship between two papers."""
-        query = """
-            MATCH (p1:Paper {pmid: $citing_pmid})
-            MATCH (p2:Paper {pmid: $cited_pmid})
-            MERGE (p1)-[:CITES]->(p2)
-        """
-        self.client.create_graph(query, {"citing_pmid": citing_pmid, "cited_pmid": cited_pmid})
+            """,
+            {"ui": mesh_ui, "qualifier": qualifier},
+        )
