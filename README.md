@@ -29,8 +29,6 @@
   - [Usage](#usage)
     - [Configuration](#configuration)
     - [Data Collection](#data-collection)
-      - [PubMed Data Collection](#pubmed-data-collection)
-      - [Gene Data Collection](#gene-data-collection)
     - [Infrastructure Setup](#infrastructure-setup)
       - [Neo4j Graph Database](#neo4j-graph-database)
       - [Qdrant Vector Database](#qdrant-vector-database)
@@ -45,7 +43,7 @@
 
 ## Overview
 
-biomedical-graphrag is a comprehensive GraphRAG (Graph Retrieval-Augmented Generation) system designed for biomedical research. It combines knowledge graphs with vector search to provide intelligent querying and analysis of biomedical literature and genomic data.
+A comprehensive GraphRAG (Graph Retrieval-Augmented Generation) system designed for biomedical research. It combines knowledge graphs with vector search to provide intelligent querying and analysis of biomedical literature and genomic data.
 
 **Key Features:**
 
@@ -54,7 +52,6 @@ biomedical-graphrag is a comprehensive GraphRAG (Graph Retrieval-Augmented Gener
 - **Intelligent Querying**: Uses LLM-powered tool selection for graph enrichment and semantic search
 - **Biomedical Schema**: Specialized graph schema for papers, authors, institutions, genes, and MeSH terms
 - **Async Processing**: High-performance async data collection and processing
-- **Modern Architecture**: Built with Python 3.13, Pydantic, and modern async patterns
 
 ## Project Structure
 
@@ -163,19 +160,15 @@ JSON_DATA__GENE_JSON_PATH=data/gene_dataset.json
 
 ### Data Collection
 
-The system includes data collectors for biomedical datasets:
-
-#### PubMed Data Collection
+The system includes data collectors for biomedical and gene datasets:
 
 ```bash
 # Collect PubMed papers and metadata
 make pubmed-data-collector-run
 ```
 
-#### Gene Data Collection
-
 ```bash
-# Collect gene information and annotations
+# Collect gene information related to the pubmed dataset
 make gene-data-collector-run
 ```
 
@@ -213,7 +206,7 @@ make delete-qdrant-collection
 make custom-qdrant-query QUESTION="Which institutions have collaborated most frequently on papers about 'Gene Editing' and 'Immunotherapy'?"
 
 # Or run directly with the CLI
-uv run src/biomedical_graphrag/application/cli/query_vectorstore.py --ask "Your question here"
+uv run src/biomedical_graphrag/application/cli/query_vectorstore.py --ask "Which institutions have collaborated most frequently on papers about 'Gene Editing' and 'Immunotherapy'?"
 ```
 
 #### Hybrid Neo4j + Qdrant Queries
@@ -226,7 +219,7 @@ make example-graph-query
 make custom-graph-query QUESTION="What are the latest research trends in cancer immunotherapy?"
 
 # Or run directly with the CLI
-uv run src/biomedical_graphrag/application/cli/fusion_query.py "Your biomedical question here"
+uv run src/biomedical_graphrag/application/cli/fusion_query.py "What are the latest research trends in cancer immunotherapy?"
 ```
 
 #### Available Query Types
@@ -245,7 +238,7 @@ uv run src/biomedical_graphrag/application/cli/fusion_query.py "Your biomedical 
   - Gene-paper associations
   - MeSH term relationships
   - Institution affiliations
-- LLM-powered automaric tool selection
+- LLM-powered automatic tool selection
 
 #### Sample Queries
 
