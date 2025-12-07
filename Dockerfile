@@ -6,9 +6,6 @@
 # ============================================
 FROM python:3.13-slim as builder
 
-# Cache buster - change this to force rebuild
-ARG CACHEBUST=3
-
 WORKDIR /app
 
 # Install build dependencies
@@ -17,21 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv for faster package installation
-RUN pip install uv
-
-# Copy dependency files and README (required by pyproject.toml)
-COPY pyproject.toml ./
-COPY uv.lock ./
-COPY README.md ./
-
-# Create virtual environment and install dependencies
-RUN uv venv /app/.venv
-ENV PATH="/app/.venv/bin:$PATH"
-RUN uv sync --frozen --no-dev
+# Copy requirements and install with pip (more reliable than uv)
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Verify uvicorn is installed
-RUN /app/.venv/bin/uvicorn --version
+RUN which uvicorn && uvicorn --version
 
 # ============================================
 # Stage 2: Runtime
@@ -40,7 +28,7 @@ FROM python:3.13-slim as runtime
 
 WORKDIR /app
 
-# Install runtime dependencies (curl for healthcheck, wget as backup)
+# Install runtime dependencies (curl for healthcheck)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -48,11 +36,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create non-root user for security
 RUN groupadd -r graphrag && useradd -r -g graphrag graphrag
 
-# Copy virtual environment from builder
-COPY --from=builder /app/.venv /app/.venv
+# Copy installed packages from builder
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+COPY --from=builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 
-# Set all environment variables
-ENV PATH="/app/.venv/bin:$PATH"
+# Set environment variables
 ENV PYTHONPATH="/app/src"
 ENV PYTHONUNBUFFERED=1
 
@@ -70,10 +58,10 @@ USER graphrag
 # Expose port (Railway sets PORT env var)
 EXPOSE 8000
 
-# Health check (uses default port, Railway handles port mapping)
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
-# Run the application (uses PORT env var if set, defaults to 8000)
-CMD ["sh", "-c", "/app/.venv/bin/uvicorn biomedical_graphrag.application.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Run the application
+CMD ["sh", "-c", "uvicorn biomedical_graphrag.application.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
 
