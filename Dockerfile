@@ -6,6 +6,9 @@
 # ============================================
 FROM python:3.13-slim as builder
 
+# Cache buster - change this to force rebuild
+ARG CACHEBUST=3
+
 WORKDIR /app
 
 # Install build dependencies
@@ -26,6 +29,9 @@ COPY README.md ./
 RUN uv venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 RUN uv sync --frozen --no-dev
+
+# Verify uvicorn is installed
+RUN /app/.venv/bin/uvicorn --version
 
 # ============================================
 # Stage 2: Runtime
