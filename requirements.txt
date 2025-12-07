@@ -1,0 +1,14 @@
+# Biomedical GraphRAG - Requirements
+# Generated for simple deployment platforms (Railway, Render, etc.)
+
+biopython>=1.85
+fastapi>=0.115.0
+loguru>=0.7.3
+neo4j>=5.28.2
+neo4j-graphrag>=1.10.0
+openai>=1.0.0
+pydantic>=2.12.0
+pydantic-settings>=2.11.0
+qdrant-client>=1.15.1
+uvicorn>=0.32.0
+

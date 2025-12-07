@@ -13,6 +13,20 @@ include .env
 QUESTION ?=
 
 #################################################################################
+## UI Server Commands
+#################################################################################
+
+run-ui: ## Run the Biomedical GraphRAG web UI server
+	@echo "Starting Biomedical GraphRAG UI server..."
+	uvicorn biomedical_graphrag.application.api.main:app --host 0.0.0.0 --port 8000 --reload
+	@echo "UI server stopped."
+
+run-ui-prod: ## Run the UI server in production mode
+	@echo "Starting Biomedical GraphRAG UI server (production)..."
+	uvicorn biomedical_graphrag.application.api.main:app --host 0.0.0.0 --port 8000 --workers 4
+	@echo "UI server stopped."
+
+#################################################################################
 ## Data Collector Commands
 #################################################################################
 
@@ -152,11 +166,63 @@ all-check: ruff-format ruff-check clean ## Run all: linting, formatting and type
 all-fix: ruff-format-fix ruff-check-fix mypy clean ## Run all fix: auto-formatting and linting fixes
 
 ################################################################################
+## Docker Deployment
+################################################################################
+
+docker-build: ## Build Docker image for the application
+	@echo "Building Docker image..."
+	docker build -t biomedical-graphrag:latest .
+	@echo "Docker image built successfully."
+
+docker-up: ## Start all services with Docker Compose
+	@echo "Starting all services..."
+	docker compose up -d
+	@echo "Services started. Access UI at http://localhost:8000"
+
+docker-down: ## Stop all Docker Compose services
+	@echo "Stopping all services..."
+	docker compose down
+	@echo "Services stopped."
+
+docker-logs: ## View logs from all Docker services
+	docker compose logs -f
+
+docker-logs-app: ## View logs from the app service only
+	docker compose logs -f app
+
+docker-restart: ## Restart all Docker services
+	@echo "Restarting all services..."
+	docker compose restart
+	@echo "Services restarted."
+
+docker-clean: ## Stop and remove all containers, networks, and volumes
+	@echo "Cleaning up Docker resources..."
+	docker compose down -v --remove-orphans
+	@echo "Cleanup complete."
+
+docker-status: ## Show status of Docker services
+	docker compose ps
+
+docker-setup-data: ## Initialize Neo4j graph and Qdrant collection in Docker
+	@echo "Setting up data in Docker containers..."
+	@echo "Waiting for services to be healthy..."
+	sleep 10
+	docker compose exec app python src/biomedical_graphrag/infrastructure/neo4j_db/create_graph.py
+	docker compose exec app python src/biomedical_graphrag/infrastructure/qdrant_db/qdrant_ingestion.py
+	@echo "Data setup complete!"
+
+init-cloud-databases: ## Initialize cloud databases (Neo4j Aura + Qdrant Cloud)
+	@echo "Initializing cloud databases..."
+	python scripts/init_cloud_databases.py
+	@echo "Cloud database initialization complete!"
+
+################################################################################
 ## Help
 ################################################################################
 
 help: ## Display this help message
 	@echo "Default target: $(.DEFAULT_GOAL)"
+	@echo ""
 	@echo "Available targets:"
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
