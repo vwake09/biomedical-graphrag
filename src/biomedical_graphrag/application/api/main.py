@@ -1,6 +1,7 @@
 """FastAPI backend for Biomedical GraphRAG service."""
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,28 @@ from biomedical_graphrag.application.services.query_vectorstore_service.qdrant_q
 from biomedical_graphrag.utils.logger_util import setup_logging
 
 logger = setup_logging()
+
+
+def find_frontend_path() -> Path | None:
+    """Find the frontend directory in various possible locations."""
+    possible_paths = [
+        # Docker container path
+        Path("/app/frontend"),
+        # Relative to this file (development)
+        Path(__file__).parent.parent.parent.parent.parent / "frontend",
+        # Current working directory
+        Path.cwd() / "frontend",
+        # Environment variable override
+        Path(os.environ.get("FRONTEND_PATH", "")) if os.environ.get("FRONTEND_PATH") else None,
+    ]
+
+    for path in possible_paths:
+        if path and path.exists() and (path / "index.html").exists():
+            logger.info(f"📁 Frontend found at: {path}")
+            return path
+
+    logger.warning("⚠️ Frontend directory not found")
+    return None
 
 
 # Pydantic models for request/response
@@ -48,17 +71,29 @@ class HealthResponse(BaseModel):
     services: dict[str, str]
 
 
-# Global Qdrant client
+# Global variables
 qdrant_client: AsyncQdrantQuery | None = None
+static_path: Path | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown."""
-    global qdrant_client
+    global qdrant_client, static_path
     logger.info("🚀 Starting Biomedical GraphRAG API...")
+
+    # Find frontend path
+    static_path = find_frontend_path()
+
+    # Mount static files if frontend exists
+    if static_path:
+        app.mount("/static", StaticFiles(directory=static_path), name="static")
+
+    # Initialize Qdrant client
     qdrant_client = AsyncQdrantQuery()
+
     yield
+
     logger.info("🛑 Shutting down Biomedical GraphRAG API...")
     if qdrant_client:
         await qdrant_client.close()
@@ -80,19 +115,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files for frontend
-static_path = Path(__file__).parent.parent.parent.parent.parent / "frontend"
-if static_path.exists():
-    app.mount("/static", StaticFiles(directory=static_path), name="static")
-
 
 @app.get("/", response_class=FileResponse)
 async def serve_frontend():
     """Serve the frontend HTML."""
-    index_path = static_path / "index.html"
-    if index_path.exists():
-        return FileResponse(index_path)
-    raise HTTPException(status_code=404, detail="Frontend not found")
+    if static_path:
+        index_path = static_path / "index.html"
+        if index_path.exists():
+            return FileResponse(index_path)
+    raise HTTPException(status_code=404, detail="Frontend not found. Set FRONTEND_PATH env var.")
 
 
 @app.get("/health", response_model=HealthResponse)

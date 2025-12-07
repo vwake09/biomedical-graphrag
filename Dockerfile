@@ -34,21 +34,26 @@ FROM python:3.13-slim as runtime
 
 WORKDIR /app
 
+# Install runtime dependencies (curl for healthcheck, wget as backup)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user for security
 RUN groupadd -r graphrag && useradd -r -g graphrag graphrag
 
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
+
+# Set all environment variables
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app/src"
+ENV PYTHONUNBUFFERED=1
 
 # Copy application code
 COPY src/ ./src/
 COPY frontend/ ./frontend/
 COPY data/ ./data/
-
-# Set Python path
-ENV PYTHONPATH="/app/src:$PYTHONPATH"
-ENV PYTHONUNBUFFERED=1
 
 # Change ownership to non-root user
 RUN chown -R graphrag:graphrag /app
@@ -60,7 +65,7 @@ USER graphrag
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application
