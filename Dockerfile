@@ -69,5 +69,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
 # Run the application (uses PORT env var if set, defaults to 8000)
-CMD ["sh", "-c", "uvicorn biomedical_graphrag.application.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "/app/.venv/bin/uvicorn biomedical_graphrag.application.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
 
